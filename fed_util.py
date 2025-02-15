@@ -225,23 +225,16 @@ def get_head_agg_weight_optimized(hList, vList, clientCount, activityCount, proj
 
 
 def fedPacFit(localModel,clientDataTrain,clientLabelTrain,nonOneHotLabels,optimizer,batchSize,epochs,globalPrototype,activityCount,lamda = 1.0):
-    # agg_protos_label = {activityID: [] for activityID in range(activityCount)}
     agg_protos_label = [[] for _ in range(activityCount)]
     for epoch in range(epochs):
         indices = tf.range(start=0, limit = clientDataTrain.shape[0], dtype=tf.int32)
         shuffled_indices = tf.random.shuffle(indices)
         batchIndex = [shuffled_indices[i:i+batchSize] for i in range(0,len(shuffled_indices),batchSize)]
-        # print("hi", flush = True)
-        # print(globalPrototype.shape, flush = True)
 
         for index in batchIndex:
             x = tf.gather(clientDataTrain, index, axis=0)
             labels = tf.gather(clientLabelTrain, index, axis=0)
             nonOneHotLabelBatch = tf.gather(nonOneHotLabels, index, axis=0)
-
-            # nonOneHotLabels = tf.argmax(labels,axis = -1, output_type = tf.dtypes.int32)
-
-            # nonOneHotLabels = tf.argmax(labels,axis = -1, output_type = tf.dtypes.int32)
             prototypeLabel = tf.gather(globalPrototype,nonOneHotLabelBatch)   
 
             with tf.GradientTape() as tape:
@@ -249,7 +242,6 @@ def fedPacFit(localModel,clientDataTrain,clientLabelTrain,nonOneHotLabels,optimi
                 cce_loss = tf.keras.losses.CategoricalCrossentropy()(labels, outputs)
                 mse_loss = tf.math.reduce_mean(tf.keras.losses.MSE(localPrototype,prototypeLabel))
                 # print("cce" + str(cce_loss),flush = True)
-
                 # print("mse" + str(mse_loss),flush = True)
                 fedpac_loss = cce_loss + mse_loss * lamda
             grads = tape.gradient(fedpac_loss, localModel.trainable_variables)
@@ -494,7 +486,7 @@ def fedALP_prototypeOnly(clientNumber,clientDataTrain,clientLabelTrain,clientDat
             None]
 
 
-def fedALP_global_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,
+def fedAli_global_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,
                           clientLabelTest,prototypeCount,localPrototype,adaptLayerLocation,
                           pretrainModel,prototypeDecay,influenceFactor,usePersonalPrototype,useGLU,singleUpdate):
 
@@ -931,7 +923,7 @@ def set_evaluator(shared_vars,GPULIST,devID):
 
 def strategy_evaluator(clientNumber,clientDataTest,clientLabelTest):
     print("Loading Client "+str(i))
-    if(strategyFL == 'FEDALP'):
+    if(strategyFL == 'FEDALI'):
         if(loadPretrain):
             localModel = model.HART_ALP_GLOBAL(input_shape = (segment_size,num_input_channels),
                                                activityCount = activityCount,

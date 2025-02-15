@@ -53,6 +53,7 @@ if __name__ == "__main__":
 
 
     os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 
     # In[ ]:
@@ -60,10 +61,12 @@ if __name__ == "__main__":
 
     algorithm = "FEDALI"
     # FEDALI, FEDAVG, FEDPROTO
-    # MOON,FEDAVG,FEDALI,FEDPROX
+    # MOON,FEDAVG,FEDPROX, FEDPAC
+    # UCI,REALWORLD_CLIENT,SHL_128_PreviewLowPass,SHL_128_Body_PreviewLowPass,SHL_128_Time_PreviewLowPass,HHAL_DEVICE,Motion_Sense
+    dataSetName = 'Combined'
 
-    dataSetName = 'HHAR'
-    # RealWorld, HHAR
+    #BALANCED, UNBALANCED
+    dataConfig = "BALANCED"
 
     input_shape = (128,6)
 
@@ -80,6 +83,8 @@ if __name__ == "__main__":
 
     clientLearningRate =  1e-4
 
+    adaptiveLearningRate =  clientLearningRate * 0.5
+
     batch_fold = 5
 
     # model drop out rate
@@ -95,21 +100,23 @@ if __name__ == "__main__":
 
     parallelInstancesCPU = 4
 
-    parallelInstancesGPU = 2
+    parallelInstancesGPU = 4
 
     mu = 1.0
 
-    centerBased = False
-
     projection_dim = 192 
-
-    decayRate = 0.999
 
     architecture = "HART"
 
     prototypeNum = 256
 
-    loadPretrain = False
+    clusterMethod = "kmean"
+
+    loadPretrain = True
+
+    warmUpEpoch = 0
+
+    aggregatePrototype = True
 
     initial_lr = 0.999
     end_lr = 0.999
@@ -155,8 +162,6 @@ if __name__ == "__main__":
             help='Algorithm')
         parser.add_argument('--mu', type=float, default=mu, 
             help='Mu')  
-        parser.add_argument('--centerBased', type=lambda x: bool(strtobool(x)), default=centerBased, 
-            help='centerBased')  
         parser.add_argument('--parallelInstancesGPU', type=int, default=parallelInstancesGPU, 
             help='Number of tasks per GPU')  
         parser.add_argument('--localEpoch', type=int, default=localEpoch, 
@@ -167,8 +172,12 @@ if __name__ == "__main__":
             help='Number of tasks per GPU')  
         parser.add_argument('--initial_lr', type=float, default=initial_lr, 
             help='Number of tasks per GPU')  
+        parser.add_argument('--clusterMethod', type=str, default=clusterMethod, 
+            help='clusterMethod')  
         parser.add_argument('--loadPretrain', type=lambda x: bool(strtobool(x)), default=loadPretrain,
             help='loadPretrain')  
+        parser.add_argument('--aggregatePrototype', type=lambda x: bool(strtobool(x)), default=aggregatePrototype,
+            help='aggregatePrototype')  
         parser.add_argument('--communicationRound', type=int, default=communicationRound, 
             help='Number of communicationRound')  
         parser.add_argument('--prototypeNum', type=int, default=prototypeNum, 
@@ -182,6 +191,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
         return args
 
+    # clusterMethod
 
     if not is_interactive():
         args = add_fit_args(argparse.ArgumentParser(description='Federated Learning Experiments'))
@@ -190,9 +200,10 @@ if __name__ == "__main__":
         localEpoch = args.localEpoch
         clientLearningRate = args.clientLearningRate
         mu = args.mu
-        centerBased = args.centerBased
+        clusterMethod = args.clusterMethod
         parallelInstancesGPU = args.parallelInstancesGPU
         loadPretrain = args.loadPretrain
+        aggregatePrototype = args.aggregatePrototype
         influenceFactor = args.influenceFactor
         communicationRound = args.communicationRound
         prototypeNum = args.prototypeNum
@@ -205,7 +216,7 @@ if __name__ == "__main__":
     # In[ ]:
 
 
-    prototype_learningRate_scheduler = LinearLearningRateScheduler(initial_lr,end_lr, communicationRound)
+    prototype_linear_scheduler = LinearLearningRateScheduler(initial_lr,end_lr, 100)
 
 
     # In[ ]:
@@ -230,6 +241,15 @@ if __name__ == "__main__":
 
     if(algorithm == 'FEDALI'):
         architectureType = architectureType +'_influenceFactor_'+str(influenceFactor)
+        architectureType = architectureType +'_initialLr_'+str(initial_lr)
+
+        if(aggregatePrototype):
+            architectureType = architectureType +'_aggregate'
+        if(usePersonalPrototype):
+            architectureType = architectureType +'_personalPrototype'
+        if(singleUpdate):
+            architectureType = architectureType +'_single'
+        architectureType = architectureType +"_v4"
 
     if(algorithm == 'MOON' or algorithm == 'FEDPROX'):
         architectureType = architectureType +"_mu_"+str(mu)
@@ -271,8 +291,6 @@ if __name__ == "__main__":
     tf.random.set_seed(randomSeed)
     random.seed(randomSeed)
     checkpointProp = load_checkpoint(filepath)
-
-
 
 
     # In[ ]:
@@ -332,13 +350,7 @@ if __name__ == "__main__":
 
 
     clientCount = clientDataTest.shape[0]
-    # to test/develop, you can set clients count manually to a lower number
-
-
-    # In[ ]:
-
-
-    clientCount = 2
+    # to test/develop, you can set clients count manually to a lower number eg clientCount = 2 
 
 
     # In[ ]:
@@ -370,6 +382,7 @@ if __name__ == "__main__":
         resourcePool = availableCPUPOOl * parallelInstancesCPU
     else:
         resourcePool = resourcePool * parallelInstancesGPU
+        GPUPool = [availableGPUPOOl[client%len(availableGPUPOOl)] for client in range(clientCount)]
         GPUPoolIndex = [client%len(availableGPUPOOl) for client in range(clientCount)]
 
     # limits the amount of workers from more than neccesary
@@ -430,10 +443,6 @@ if __name__ == "__main__":
     adaptiveLoss = checkpointProp['adaptiveLoss'] 
     adaptiveLossStd = checkpointProp['adaptiveLossStd'] 
 
-    # prototypeStabilityEpoch = {i: [] for i in range(nbOfBlocks)}
-    # previousPrototype = np.empty(nbOfBlocks, dtype=object)  
-
-
     prototypeStabilityEpoch =  checkpointProp['prototypeStabilityEpoch'] 
     previousPrototype =  checkpointProp['previousPrototype']
 
@@ -451,10 +460,9 @@ if __name__ == "__main__":
 
 
     trainingInit = os.path.exists(filepath+'serverWeights.h5') 
-    # if model already ran, we do no load the pre-trained MAE model. We will later load the weights from the previous training instance.
 
     if(algorithm == "FEDALI"):
-        pretraindir = './pretrained_models/MAE_ALP_FE.h5'
+        pretraindir = './pretrained_models/MAE_ALP_FE_Right.h5'
         serverModel = model.createAndLoadHART_ALP(prototypeLayers,
                                                   activityCount,
                                                   loadPretrain = loadPretrain, 
@@ -471,6 +479,7 @@ if __name__ == "__main__":
 
     if(trainingInit):
         print("Weights Found, Loading Server Model Weights")
+        # serverModel.load_weights(filepath+'serverWeights.h5')
         serverModel.load_weights(filepath+'serverWeights.h5')
     else:
         serverModel.save_weights(filepath+'serverWeights.h5')
@@ -488,7 +497,6 @@ if __name__ == "__main__":
 
         checkpointProp["CommunicationRound"] = roundNum + 1
 
-        # client models test againts own test-set
         checkpointProp['trainLossHistory'] =  trainLossHistory
         checkpointProp['trainAccHistory'] =  trainAccHistory
         checkpointProp['testLossHistory'] =  testLossHistory
@@ -497,6 +505,7 @@ if __name__ == "__main__":
 
         checkpointProp['adaptiveLoss'] = adaptiveLoss
         checkpointProp['adaptiveLossStd'] = adaptiveLossStd
+
         checkpointProp['stdTestLossHistory'] = stdTestLossHistory
         checkpointProp['stdTestAccHistory'] = stdTestAccHistory
 
@@ -537,8 +546,7 @@ if __name__ == "__main__":
 
         checkpointProp['globalTestAlignZeroLossHistory'] = globalTestAlignZeroLossHistory
         checkpointProp['globalTestAlignZeroAccHistory'] = globalTestAlignZeroAccHistory
-    #     checkpointProp['autoEncoderHistory'] = autoEncoderHistory.history["loss"]
-        hkl.dump(checkpointProp, filepath + 'checkpoint.hkl')
+        hkl.dump(checkpointProp,filepath+'checkpoint.hkl')
 
 
 
@@ -557,7 +565,10 @@ if __name__ == "__main__":
 
     def limit_memory():
         """ Release unused memory resources. Force garbage collection """
-        tf.keras.backend.clear_session()
+        K.clear_session()
+        tf.compat.v1.keras.backend.get_session().close()
+        tf.compat.v1.reset_default_graph()
+        K.set_session(tf.compat.v1.Session())
         gc.collect()
 
 
@@ -597,11 +608,13 @@ if __name__ == "__main__":
 
 
     embedLayerIndexTemp = Value('i', clientsEmbedLayer, lock=False)
+    batch_foldTemp = Value('i', batch_fold, lock=False)
     segment_sizeTemp = Value('i', segment_size, lock=False)
     num_input_channelsTemp = Value('i', num_input_channels, lock=False)
     activityCountTemp = Value('i', activityCount, lock=False)
     showTrainVerboseTemp = Value('i', showTrainVerbose, lock=False)
     clientLearningRateTemp = Value('d', clientLearningRate, lock=False)
+    adaptiveLearningRateTemp = Value('d', adaptiveLearningRate, lock=False)
     batch_sizeTemp = Value('i', batch_size, lock=False)
     localEpochTemp = Value('i', localEpoch, lock=False)
     centralTestDataTemp = Array('d',centralTestData.flatten(),lock=False)
@@ -612,20 +625,32 @@ if __name__ == "__main__":
     muTemp = Value('d', mu, lock=False)
     client_ids = context.Value('i', -1)
 
-
+    tempArchValue = 0
+    if(architecture == 'ISPL'):
+        tempArchValue = 1
+    architecture_temp = Value('i', tempArchValue, lock=False)
     shared_vars = (embedLayerIndexTemp,
+                   batch_foldTemp,
                    segment_sizeTemp,
                    num_input_channelsTemp,
                    activityCountTemp,
                    showTrainVerboseTemp,
                    clientLearningRateTemp,
+                   adaptiveLearningRateTemp,
                    batch_sizeTemp,
                    localEpochTemp,
                    centralTestDataTemp,
                    centralTestLabelTemp,
                    generalizationTestTemp,
                    filepathTemp,
-                   muTemp)
+                   muTemp,
+                   architecture_temp)
+
+
+    # In[ ]:
+
+
+
 
 
     # In[ ]:
@@ -635,7 +660,7 @@ if __name__ == "__main__":
         layerIndexTracker = 0
         layerAdaptIndex = []
         alignLayerIndex = []
-        layerSearchName = "alignment"
+        layerSearchName = "adaptive"
         if(loadPretrain):
             maeLayerIndex = None
             blockSearchName = "mae_encoder"
@@ -651,7 +676,9 @@ if __name__ == "__main__":
             
 
             # this is very hard coded for HART with the adaptive layer.
-            layerAdaptIndex = []        
+            layerAdaptIndex = []
+            layerSearchName = "adaptive"
+            
             adaptLayerLocation = []
             for i, layer in enumerate(serverModel.layers[3].layers):
                 layer_name = layer.name
@@ -673,7 +700,6 @@ if __name__ == "__main__":
             for i, layer in enumerate(serverModel.layers):
                 layer_name = layer.name
                 num_params = len(layer.get_weights())
-                print(layer.name)
                 if layerSearchName in layer.name:
                     adaptLayerLocation.append(i)
                     print("Index :"+str(i))
@@ -705,8 +731,7 @@ if __name__ == "__main__":
                 clientLocalPrototype = [serverModel.get_weights()[localPrototypeIndex] for localPrototypeIndex in layerAdaptIndex]
                 clientsLocalPrototypes.append(np.asarray(clientLocalPrototype,dtype=object))
             print("Local prototypes not found, generating new ones")
-            hkl.dump(clientsLocalPrototypes, localPrototypeDir)
-
+            hkl.dump(clientsLocalPrototypes,localPrototypeDir)
 
     elif(algorithm == 'MOON'):
         prevModelPath = filepath + 'prevModels/'
@@ -719,6 +744,9 @@ if __name__ == "__main__":
                 prevClientPath = prevModelPath+'clientModel'+str(clientIdx)+'.h5'
                 clientPrevModelDir.append(prevClientPath)
                 serverModel.save_weights(prevClientPath)
+                # hkl.dump(local_weights[clientIdx],prevClientPath )
+
+        
 
 
     # In[ ]:
@@ -736,6 +764,12 @@ if __name__ == "__main__":
             globalPrototype = hkl.load(filepath+'globalPrototypes.hkl')
         else:
             globalPrototype = tf.Variable(tf.random.normal((activityCount,projection_dim)),trainable= False)
+    elif(algorithm == "FEDPAC"):
+        os.makedirs(filepath + 'clientModels/', exist_ok=True)
+        if(os.path.exists(filepath+'globalPrototypes.hkl')):
+            globalPrototype = hkl.load(filepath+'globalPrototypes.hkl')
+        else:
+            globalPrototype = None
     elif(algorithm == "FEDPER"):
         os.makedirs(filepath + 'clientModels/', exist_ok=True)
 
@@ -756,7 +790,7 @@ if __name__ == "__main__":
                                                ) as executor:
             
             if(algorithm == 'FEDALI'):
-                prototypeDecay = np.tile(prototype_learningRate_scheduler(roundNum),(clientCount))
+                prototypeDecay = np.tile(prototype_linear_scheduler(roundNum),(clientCount))
                 # we do use the global prototype in the 1st communication round
                 if(roundNum == 0):
                     influenceFactors = np.tile(0.0,clientCount)
@@ -766,7 +800,7 @@ if __name__ == "__main__":
 
                 useGLUs = np.tile(useGLU,clientCount)
                 singleUpdates = np.tile(singleUpdate,clientCount)
-                comRoundResults = [x for x in executor.map(fed_util.fedALP_global_Trainer, 
+                comRoundResults = [x for x in executor.map(fed_util.fedAli_global_Trainer, 
                                    trainPool,
                                    clientDataTrain, 
                                    clientLabelTrain,
@@ -830,15 +864,27 @@ if __name__ == "__main__":
                                        clientLabelTest,
                                        loadPretrains,
                                       )]
+            elif(algorithm == 'FEDPAC'):
+                if(globalPrototype is None):
+                    globalPrototypes = np.tile(globalPrototype,(clientCount))
+                else:
+                    globalPrototype = tf.convert_to_tensor(globalPrototype, dtype=tf.float32)
+                    globalPrototypes = np.tile(globalPrototype,(clientCount,1,1))
+                comRoundResults = [x for x in executor.map(fed_util.fedPac_Trainer, 
+                                       trainPool,
+                                       clientDataTrain, 
+                                       clientLabelTrain,
+                                       clientDataTest,
+                                       clientLabelTest,
+                                       globalPrototypes,
+                                       loadPretrains
+                                      )]
             else:
                 raise Exception("Unrecognized strategy")
 
-        executor.shutdown(wait=True)
-        gc.collect()
-            
         comRoundResults = np.asarray(comRoundResults, dtype=object)
         local_weights = comRoundResults[:,1]
-        adaptLoss =  comRoundResults[:,2]
+        aggregationVars =  comRoundResults[:,2]
         trainAcc = comRoundResults[:,3]
         trainLoss = comRoundResults[:,4]
         testAcc = comRoundResults[:,5]
@@ -846,8 +892,9 @@ if __name__ == "__main__":
         clientTestAcc = comRoundResults[:,7]
         clientTestLoss = comRoundResults[:,8]
         fitTime = comRoundResults[:,9]
-        fedProtoAggregate = comRoundResults[:,10]
+        clientPrototypes = comRoundResults[:,10]
 
+        
         if(usePersonalPrototype):
             clientsLocalPrototypes = []
             for clientIndex in range(clientCount):
@@ -870,10 +917,11 @@ if __name__ == "__main__":
             logging.warning("Previous Score: "+str(currentAccuracy)+" from round "+str(bestModelRound)+", Now:"+str(meanTestAcc)+" from round "+str(roundNum))
             best_local_weights = []
             for clientID in trainPool:
-                hkl.dump(local_weights[clientID], bestModelPath + f"bestModel{clientID}.hkl")
+                hkl.dump(local_weights[clientID],bestModelPath + "bestModel"+str(clientID)+".hkl" )
             currentAccuracy = meanTestAcc
             bestModelRound = roundNum 
-            gc.collect()
+
+
 
         meanGerneralizationAcc = np.mean(clientTestAcc)
 
@@ -883,23 +931,13 @@ if __name__ == "__main__":
 
         clientStdTestLossHistory.append(np.std(clientTestLoss))
         clientStdTestAccHistory.append(np.std(clientTestAcc))
-
-        if(meanGerneralizationAcc > currentGeneralizationAccuracy):
-            logging.warning("Better Generalization Accuracy Observed")
-            logging.warning("Previous Score: "+str(currentGeneralizationAccuracy)+", Now:"+str(meanGerneralizationAcc))
-            currentGeneralizationAccuracy = meanGerneralizationAcc
-            best_local_weights = []
-            for clientID in trainPool:
-                hkl.dump(local_weights[clientID], bestModelPath + f"bestGenModel{clientID}.hkl")
-            currentAccuracy = meanTestAcc
-            bestModelRound = roundNum 
-            gc.collect()
-
+        startAggregationTime = time.time()
 
         #FedAvg weightedAveraging 
 
+
         newWeight = []
-        globalPrototypes = []
+        globalPrototype = []
         # localPrototypes = []
         if(algorithm == 'FEDALI'):
             for index,adaptIndex in enumerate(layerAdaptIndex):
@@ -918,55 +956,87 @@ if __name__ == "__main__":
                     cluster_mean = tf.reduce_mean(cluster_data, axis=0)  # Compute the mean of the cluster
                     cluster_means.append(cluster_mean)
                 cluster_means_tensor = tf.squeeze(tf.stack(cluster_means)) 
-                globalPrototypes.append(cluster_means_tensor)
+                globalPrototype.append(cluster_means_tensor)
+
+        if(algorithm == 'FEDPAC'):
+            hList, vList, clientSizeList = zip(*[(h, v, size) for h, v, size in aggregationVars])
+            headCalculationStart = time.time()                
+            clientHeadCoefs = fed_util.get_head_agg_weight_optimized(hList,vList,len(trainPool),activityCount)
+            # clientHeadCoefs = fed_util.get_head_agg_weight(hList,vList,len(trainPool),activityCount)
+            headCalculation = (time.time() - headCalculationStart)/60 
+
+            logging.warning("Head calculation time: "+str(headCalculation))
+
+            serverBaseWeights = []
+            for modelBackBoneIdx in range(layerCount - 4):
+                serverBaseWeights.append(np.sum([local_weights[idx][modelBackBoneIdx] * local_coeffs[clientIndex] for idx,clientIndex in enumerate(trainPool)],axis = 0))
+            
+            for clientIndex,clientID in enumerate(trainPool):
+                clientHeadWeights = []
+                for modelHeadIdx in range(layerCount - 4,layerCount):
+                    clientNewHeadWeight = np.zeros(local_weights[clientIndex][modelHeadIdx].shape)
+                    for innerClientID, clientHeadCoef in enumerate(clientHeadCoefs[clientIndex]):
+                        clientNewHeadWeight += local_weights[innerClientID][modelHeadIdx] * clientHeadCoef
+                    clientHeadWeights.append(clientNewHeadWeight)
+                clientModelWeights = serverBaseWeights + clientHeadWeights
+                hkl.dump(clientModelWeights,filepath+'clientModels/localModel'+str(clientID)+'.hkl', mode='w')
+
+
+            globalPrototype = fed_util.fedPacProtoAgggregation(clientSizeList,clientPrototypes)
+            hkl.dump(globalPrototype,filepath+'globalPrototypes.hkl' )
+
+        else:
+            for index,i in enumerate(trainPool):
+                for j in range(0,len(local_weights[i])):
+                    local_weights[i][j] = local_weights[i][j] * local_coeffs[i]
+        
+        
+            blockIndex = 0
+            for layerIndex in range(layerCount):
+                averagedLayerWeight = np.sum([local_weights[clientIndex][layerIndex] for clientIndex in range(len(local_weights))],axis = 0)
+                newWeight.append(averagedLayerWeight)
+        
+                if(algorithm == 'FEDALI'):
+                    if(layerIndex in layerAdaptIndex):
+                        if(roundNum != 0):
+                            prototypeStabilityEpoch[blockIndex].append(tf.reduce_mean(tf.math.abs(globalPrototype[blockIndex] - previousPrototype[blockIndex])))
+                        previousPrototype[blockIndex] = globalPrototype[blockIndex]
+                        blockIndex += 1
+
+                
+        if(algorithm == 'FEDALI'):
+            for idx, globalIndex in enumerate(globalPrototypeIndex):
+                newWeight[globalIndex] = globalPrototype[idx]
+            for idx, localIndex in enumerate(layerAdaptIndex):
+                newWeight[localIndex] = globalPrototype[idx]
+
+        if(algorithm != 'FEDPAC'):
+            serverModel.set_weights((newWeight))
+            del averagedLayerWeight
+            if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' and algorithm != 'FEDPAC' ):
+                logging.warning("Evaluating Server Model")
+                globalTestMetrics = serverModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
+                globalTestLossHistory.append(globalTestMetrics[0])
+                globalTestAccHistory.append(globalTestMetrics[1])
+                if(globalTestMetrics[1]>serverCurrentAccuracy):
+                    logging.warning("Better Global Accuracy Observed")
+                    logging.warning("Previous Score: "+str(serverCurrentAccuracy)+" from round "+str(serverbestModelRound)+", Now:"+str(globalTestMetrics[1])+" from round "+str(roundNum))
+                    serverCurrentAccuracy = globalTestMetrics[1]
+                    serverbestModelRound = roundNum
+                    serverModel.save_weights(filepath+'bestServerWeights.h5')
+                    bestServerModelWeights = copy.deepcopy(serverModel.get_weights())
+            serverModel.save_weights(filepath+'serverWeights.h5')
 
         
-        for index,i in enumerate(trainPool):
-            for j in range(0,len(local_weights[i])):
-                local_weights[i][j] = local_weights[i][j] * local_coeffs[i]
-
-
-        blockIndex = 0
-        for layerIndex in range(layerCount):
-            averagedLayerWeight = np.sum([local_weights[clientIndex][layerIndex] for clientIndex in range(len(local_weights))],axis = 0)
-            newWeight.append(averagedLayerWeight)
-
-            if(algorithm == 'FEDALI' or algorithm == 'FEDPROX_ALP' or algorithm == 'MOON_ALP'):
-                if(layerIndex in layerAdaptIndex):
-                    if(roundNum != 0):
-                        prototypeStabilityEpoch[blockIndex].append(tf.reduce_mean(tf.math.abs(globalPrototypes[blockIndex] - previousPrototype[blockIndex])))
-                    previousPrototype[blockIndex] = globalPrototypes[blockIndex]
-                    blockIndex += 1
-
-                
-        if(algorithm == 'FEDALI' or algorithm == 'FEDPROX_ALP' or algorithm == 'MOON_ALP'):
-            for idx, globalIndex in enumerate(globalPrototypeIndex):
-                newWeight[globalIndex] = globalPrototypes[idx]
-            for idx, localIndex in enumerate(layerAdaptIndex):
-                newWeight[localIndex] = globalPrototypes[idx]
-                
-        serverModel.set_weights((newWeight))
-        del newWeight
-        del averagedLayerWeight
-        if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' ):
-            logging.warning("Evaluating Server Model")
-            globalTestMetrics = serverModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
-            globalTestLossHistory.append(globalTestMetrics[0])
-            globalTestAccHistory.append(globalTestMetrics[1])
-            if(globalTestMetrics[1]>serverCurrentAccuracy):
-                logging.warning("Better Global Accuracy Observed")
-                logging.warning("Previous Score: "+str(serverCurrentAccuracy)+" from round "+str(serverbestModelRound)+", Now:"+str(globalTestMetrics[1])+" from round "+str(roundNum))
-                serverCurrentAccuracy = globalTestMetrics[1]
-                serverbestModelRound = roundNum
-                serverModel.save_weights(filepath+'bestServerWeights.h5')
-                bestServerModelWeights = copy.deepcopy(serverModel.get_weights())
-        serverModel.save_weights(filepath+'serverWeights.h5')
         roundEndTime = time.time() - roundStartTime
         roundTrainingTime.append(roundEndTime / 60)
 
+
+
+        
         if(algorithm == 'FEDPROTO'):
 
-            clientActivitySampleCounts = [[len(fedProtoAggregate[clientIdx][activityIdx]) for activityIdx in range(activityCount)] for clientIdx in range(clientCount)]
+            clientActivitySampleCounts = [[len(clientPrototypes[clientIdx][activityIdx]) for activityIdx in range(activityCount)] for clientIdx in trainPool]
             totalActivitySampleCounts = tf.math.reduce_sum(clientActivitySampleCounts,axis = 0)
             
             clientLocalPrototypes = []
@@ -974,20 +1044,28 @@ if __name__ == "__main__":
                 activityMean = []
                 for activityIdx in range(activityCount): 
                     clientActivityCoef = tf.cast(clientActivitySampleCounts[clientIdx][activityIdx] / totalActivitySampleCounts[activityIdx],dtype = tf.float32) 
-                    if(len(fedProtoAggregate[clientIdx][activityIdx]) > 0 ):
-                        activityMean.append(tf.math.reduce_mean(fedProtoAggregate[clientIdx][activityIdx], axis = 0) * clientActivityCoef)
+                    if(len(clientPrototypes[clientIdx][activityIdx]) > 0 ):
+                        activityMean.append(tf.math.reduce_mean(clientPrototypes[clientIdx][activityIdx], axis = 0) * clientActivityCoef)
                     else:
                         activityMean.append(tf.zeros(projection_dim))
                 clientLocalPrototypes.append(activityMean)
             globalPrototype = tf.reduce_sum(clientLocalPrototypes,axis = 0)
+            hkl.dump(globalPrototype,filepath+'globalPrototypes.hkl' )
 
-            hkl.dump(globalPrototype, filepath + 'globalPrototypes.hkl')
+        aggregationTime = (time.time() - startAggregationTime)/60 
+
+        del newWeight
+
+        # for clientID in trainPool:
+        #     hkl.dump(local_weights[clientID],trainModelPath + "trainModel"+str(clientID)+".hkl" )    
         checkPointProgress()
-        logging.warning("Training time on communcation round " +str(roundNum)+ " is :"+str(roundEndTime / 60) +" minutes")
+        logging.warning("Client fit time on communcation round " +str(roundNum)+ " is :"+str(np.mean(fitTime)) +" minutes")
+        logging.warning("Aggregation time on communcation round " +str(roundNum)+ " is :"+str(aggregationTime / 60) +" minutes")
+        logging.warning("Total Training time on communcation round " +str(roundNum)+ " is :"+str(roundEndTime / 60) +" minutes")
         logging.warning("Fit time " +str(np.max(fitTime)))
         logging.warning("Personalization Accuracy " +str(meanTestAcc) +" Loss: " +str(meanTestLoss))
         logging.warning("Generalization Accuracy " +str(clientTestAccHistory[-1]) + " Loss: " +str(clientTestLossHistory[-1]))
-        if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' ):
+        if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' and algorithm != 'FEDPAC'):
             logging.warning("Global Accuracy " +str(globalTestAccHistory[-1]) +" Loss: " +str(globalTestLossHistory[-1]))
 
 
@@ -1012,6 +1090,7 @@ if __name__ == "__main__":
     clientTestLossHistory = np.asarray(clientTestLossHistory[:communicationRound])
     clientTestAccHistory = np.asarray(clientTestAccHistory[:communicationRound])
 
+
     if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' ):
         globalTestLossHistory = np.asarray(globalTestLossHistory[:communicationRound])
         globalTestAccHistory = np.asarray(globalTestAccHistory[:communicationRound])
@@ -1032,6 +1111,9 @@ if __name__ == "__main__":
     hkl.dump(testAccHistory,filepath + "trainingStats/testAccHistory.hkl" )
     hkl.dump(stdTestLossHistory,filepath + "trainingStats/stdTestLossHistory.hkl" )
     hkl.dump(stdTestAccHistory,filepath + "trainingStats/stdTestAccHistory.hkl" )
+        
+    # hkl.dump(adaptiveLoss,filepath + "trainingStats/adaptiveLoss.hkl" )
+    # hkl.dump(adaptiveLossStd,filepath + "trainingStats/adaptiveLossStd.hkl" )
         
     if(GeneralizationTest == True):
         hkl.dump(clientStdTestLossHistory,filepath + "trainingStats/clientStdTestLossHistory.hkl" )
@@ -1064,7 +1146,7 @@ if __name__ == "__main__":
     # Plotting results
     epoch_range = range(1, communicationRound+1)
 
-    if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' ):
+    if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' and algorithm != 'FEDPAC' ):
         plt.plot(epoch_range, globalTestAccHistory, label= 'Global Test',color="orange")
         plt.plot(epoch_range, globalTestAccHistory,markevery=[np.argmax(globalTestAccHistory)], ls="", marker="o",color="orange") 
 
@@ -1086,7 +1168,7 @@ if __name__ == "__main__":
     plt.savefig(filepath+'LearningAccuracy.png', bbox_inches="tight", format="png")
     plt.clf()
 
-    if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' ):
+    if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' and algorithm != 'FEDPAC'):
         plt.plot(epoch_range, globalTestLossHistory, label= 'Global Test',color="orange")
         plt.plot(epoch_range, globalTestLossHistory,markevery=[np.argmin(globalTestLossHistory)], ls="", marker="o",color="orange") 
         
@@ -1133,9 +1215,8 @@ if __name__ == "__main__":
 
     for i in trainPool:
         print("Loading Client "+str(i))
-
-        best_weights = hkl.load(bestModelPath + f"bestModel{i}.hkl")
-        serverModel.set_weights(best_weights)
+        clientWeightsLoad = hkl.load(bestModelPath + "bestModel"+str(i)+".hkl")
+        serverModel.set_weights(clientWeightsLoad)
         y_pred = np.argmax(serverModel.predict(clientDataTest[i],verbose = showTrainVerbose), axis=-1)
         y_test = np.argmax(clientLabelTest[i], axis=-1)
 
@@ -1143,14 +1224,19 @@ if __name__ == "__main__":
         indiMicroTest.append(f1_score(y_test, y_pred,average='micro' ))
         indiMacroTest.append(f1_score(y_test, y_pred,average='macro' ))
 
+
         y_pred = np.argmax(serverModel.predict(centralTestData,verbose = showTrainVerbose), axis=-1)
         y_test = np.argmax(centralTestLabel, axis=-1)    
 
         genWeightedTest.append(f1_score(y_test, y_pred,average='weighted'))
         genMicroTest.append(f1_score(y_test, y_pred,average='micro'))
         genMacroTest.append(f1_score(y_test, y_pred,average='macro'))
-        del best_weights
+
+        del y_pred
+        del y_test
+        del clientWeightsLoad
         gc.collect()
+        tf.keras.backend.clear_session()
 
 
     modelStatistics = {
@@ -1168,20 +1254,6 @@ if __name__ == "__main__":
         w.writerows(modelStatistics.items())
 
 
-    for i in trainPool:
-        print("Loading Client "+str(i))
-
-
-        best_gen_weights = hkl.load(bestModelPath + f"bestGenModel{i}.hkl")
-
-        serverModel.set_weights(best_gen_weights)
-        
-        y_pred = np.argmax(serverModel.predict(centralTestData,verbose = showTrainVerbose), axis=-1)
-        y_test = np.argmax(centralTestLabel, axis=-1)    
-        genBestMacroTest.append(f1_score(y_test, y_pred,average='macro'))
-
-
-
     modelStatistics = {
     "Generalization Accuracy:" : '',
     "\Generalization Best Model Round:": bestModelRound,
@@ -1190,8 +1262,6 @@ if __name__ == "__main__":
     "\nGeneralization macro f1:": roundNumber(np.mean(genMacroTest)) * 100,
     "\nGeneralization macro std f1:": roundNumber(np.std(genMacroTest)) * 100,
     "\nGeneralization macro std f1:": roundNumber(np.std(genMacroTest)) * 100,
-    "\nGeneralization best macro f1:": roundNumber(np.mean(genBestMacroTest)) * 100,
-
     }    
     with open(filepath +'GeneralizationACC.csv','w') as f:
         w = csv.writer(f)
@@ -1212,33 +1282,7 @@ if __name__ == "__main__":
     # In[ ]:
 
 
-    clientOneIndex = 0
-    clientTwoIndex = 1
-
-    if(dataSetName == 'Combined'):
-        clientOneIndex = 0
-        clientTwoIndex = datasetClientCounts[0]
-
-
-    # In[ ]:
-
-
-    # Load and set weights for clientOneIndex
-    best_weights_client_one = hkl.load(bestModelPath + f"bestModel{clientOneIndex}.hkl")
-
-    serverModel.set_weights(best_weights_client_one)
-    embed1 = extract_intermediate_model_from_base_model(serverModel, embedLayerIndex)(clientDataTest[clientOneIndex])
-
-    # Load and set weights for clientTwoIndex
-    best_weights_client_two = hkl.load(bestModelPath + f"bestModel{clientTwoIndex}.hkl")
-    serverModel.set_weights(best_weights_client_two)
-    embed2 = extract_intermediate_model_from_base_model(serverModel, embedLayerIndex)(clientDataTest[clientTwoIndex])
-
-
-    # In[ ]:
-
-
-    perplexity = 60
+    perplexity = 30
 
 
     # In[ ]:
@@ -1251,7 +1295,7 @@ if __name__ == "__main__":
     # In[ ]:
 
 
-    if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' ):
+    if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' and algorithm != 'FEDPAC' ):
         serverModel.set_weights(bestServerModelWeights)
         y_pred = np.argmax(serverModel.predict(centralTestData,verbose = showTrainVerbose), axis=-1)
         y_test = np.argmax(centralTestLabel, axis=-1)    
@@ -1277,15 +1321,7 @@ if __name__ == "__main__":
     # In[ ]:
 
 
-    labels_argmax = np.argmax(np.vstack((clientLabelTest[clientOneIndex],clientLabelTest[clientTwoIndex])), axis=-1)
-    unique_labels = np.unique(labels_argmax)
-    clientIndex = np.hstack((np.full(len(clientLabelTest[clientOneIndex]),0),np.full(len(clientLabelTest[clientTwoIndex]),1)))
-
-
-    # In[ ]:
-
-
-    if(algorithm == "FEDALI"):
+    if(algorithm == "FEDALP"):
         memoryStabilityPath = filepath+"protoTypeImages/"
         os.makedirs(memoryStabilityPath, exist_ok=True)
         prototypeStabilityCR = [prototypeStabilityEpoch[key] for key in prototypeStabilityEpoch]
@@ -1308,6 +1344,27 @@ if __name__ == "__main__":
         plt.savefig(memoryStabilityPath+"meanMemoryDisplacement.png", bbox_inches="tight")
         # plt.show()
         plt.clf()
+
+
+    # In[ ]:
+
+
+    clientOneIndex = 0
+    clientTwoIndex = 1
+
+    if(dataSetName == 'Combined'):
+        clientOneIndex = 0
+        clientTwoIndex = datasetClientCounts[0]
+
+
+    labels_argmax = np.argmax(np.vstack((clientLabelTest[clientOneIndex],clientLabelTest[clientTwoIndex])), axis=-1)
+    unique_labels = np.unique(labels_argmax)
+    clientIndex = np.hstack((np.full(len(clientLabelTest[clientOneIndex]),0),np.full(len(clientLabelTest[clientTwoIndex]),1)))
+
+    serverModel.set_weights(hkl.load(bestModelPath + "bestModel"+str(clientOneIndex)+".hkl"))
+    embed1 = extract_intermediate_model_from_base_model(serverModel,embedLayerIndex)(clientDataTest[clientOneIndex])
+    serverModel.set_weights(hkl.load(bestModelPath + "bestModel"+str(clientTwoIndex)+".hkl"))
+    embed2 = extract_intermediate_model_from_base_model(serverModel,embedLayerIndex)(clientDataTest[clientTwoIndex])
 
 
     # In[ ]:
@@ -1345,5 +1402,17 @@ if __name__ == "__main__":
     # In[ ]:
 
 
-    # print("Training Done!")
+    print("Training Done!")
+
+
+    # In[ ]:
+
+
+
+
+
+    # In[ ]:
+
+
+
 
