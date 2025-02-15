@@ -1,5 +1,4 @@
 if __name__ == "__main__":
-    #!/usr/bin/env python
     # coding: utf-8
 
     # In[ ]:
@@ -462,7 +461,7 @@ if __name__ == "__main__":
     trainingInit = os.path.exists(filepath+'serverWeights.h5') 
 
     if(algorithm == "FEDALI"):
-        pretraindir = './pretrained_models/MAE_ALP_FE_Right.h5'
+        pretraindir = './pretrained_models/MAE_ALP_FE.h5'
         serverModel = model.createAndLoadHART_ALP(prototypeLayers,
                                                   activityCount,
                                                   loadPretrain = loadPretrain, 
@@ -660,7 +659,7 @@ if __name__ == "__main__":
         layerIndexTracker = 0
         layerAdaptIndex = []
         alignLayerIndex = []
-        layerSearchName = "adaptive"
+        layerSearchName = "alignment"
         if(loadPretrain):
             maeLayerIndex = None
             blockSearchName = "mae_encoder"
@@ -677,7 +676,7 @@ if __name__ == "__main__":
 
             # this is very hard coded for HART with the adaptive layer.
             layerAdaptIndex = []
-            layerSearchName = "adaptive"
+            layerSearchName = "alignment"
             
             adaptLayerLocation = []
             for i, layer in enumerate(serverModel.layers[3].layers):
