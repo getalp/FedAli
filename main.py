@@ -1,4 +1,5 @@
 if __name__ == "__main__":
+    #!/usr/bin/env python
     # coding: utf-8
 
     # In[ ]:
@@ -58,14 +59,11 @@ if __name__ == "__main__":
     # In[ ]:
 
 
-    algorithm = "FEDALI"
+    algorithm = "FEDAVG"
     # FEDALI, FEDAVG, FEDPROTO
     # MOON,FEDAVG,FEDPROX, FEDPAC
-    # UCI,REALWORLD_CLIENT,SHL_128_PreviewLowPass,SHL_128_Body_PreviewLowPass,SHL_128_Time_PreviewLowPass,HHAL_DEVICE,Motion_Sense
-    dataSetName = 'Combined'
 
-    #BALANCED, UNBALANCED
-    dataConfig = "BALANCED"
+    dataSetName = 'HHAR'
 
     input_shape = (128,6)
 
@@ -83,11 +81,6 @@ if __name__ == "__main__":
     clientLearningRate =  1e-4
 
     adaptiveLearningRate =  clientLearningRate * 0.5
-
-    batch_fold = 5
-
-    # model drop out rate
-    dropout_rate = 0.3
 
     batch_size = 64
 
@@ -112,10 +105,6 @@ if __name__ == "__main__":
     clusterMethod = "kmean"
 
     loadPretrain = True
-
-    warmUpEpoch = 0
-
-    aggregatePrototype = True
 
     initial_lr = 0.999
     end_lr = 0.999
@@ -175,8 +164,6 @@ if __name__ == "__main__":
             help='clusterMethod')  
         parser.add_argument('--loadPretrain', type=lambda x: bool(strtobool(x)), default=loadPretrain,
             help='loadPretrain')  
-        parser.add_argument('--aggregatePrototype', type=lambda x: bool(strtobool(x)), default=aggregatePrototype,
-            help='aggregatePrototype')  
         parser.add_argument('--communicationRound', type=int, default=communicationRound, 
             help='Number of communicationRound')  
         parser.add_argument('--prototypeNum', type=int, default=prototypeNum, 
@@ -202,7 +189,6 @@ if __name__ == "__main__":
         clusterMethod = args.clusterMethod
         parallelInstancesGPU = args.parallelInstancesGPU
         loadPretrain = args.loadPretrain
-        aggregatePrototype = args.aggregatePrototype
         influenceFactor = args.influenceFactor
         communicationRound = args.communicationRound
         prototypeNum = args.prototypeNum
@@ -242,8 +228,6 @@ if __name__ == "__main__":
         architectureType = architectureType +'_influenceFactor_'+str(influenceFactor)
         architectureType = architectureType +'_initialLr_'+str(initial_lr)
 
-        if(aggregatePrototype):
-            architectureType = architectureType +'_aggregate'
         if(usePersonalPrototype):
             architectureType = architectureType +'_personalPrototype'
         if(singleUpdate):
@@ -372,8 +356,6 @@ if __name__ == "__main__":
     # In[ ]:
 
 
-    # use the one here
-    # availableGPUPOOl = get_available_gpus()[:1]
     availableGPUPOOl = get_available_gpus()
 
     resourcePool = availableGPUPOOl 
@@ -607,13 +589,11 @@ if __name__ == "__main__":
 
 
     embedLayerIndexTemp = Value('i', clientsEmbedLayer, lock=False)
-    batch_foldTemp = Value('i', batch_fold, lock=False)
     segment_sizeTemp = Value('i', segment_size, lock=False)
     num_input_channelsTemp = Value('i', num_input_channels, lock=False)
     activityCountTemp = Value('i', activityCount, lock=False)
     showTrainVerboseTemp = Value('i', showTrainVerbose, lock=False)
     clientLearningRateTemp = Value('d', clientLearningRate, lock=False)
-    adaptiveLearningRateTemp = Value('d', adaptiveLearningRate, lock=False)
     batch_sizeTemp = Value('i', batch_size, lock=False)
     localEpochTemp = Value('i', localEpoch, lock=False)
     centralTestDataTemp = Array('d',centralTestData.flatten(),lock=False)
@@ -624,26 +604,20 @@ if __name__ == "__main__":
     muTemp = Value('d', mu, lock=False)
     client_ids = context.Value('i', -1)
 
-    tempArchValue = 0
-    if(architecture == 'ISPL'):
-        tempArchValue = 1
-    architecture_temp = Value('i', tempArchValue, lock=False)
+
     shared_vars = (embedLayerIndexTemp,
-                   batch_foldTemp,
                    segment_sizeTemp,
                    num_input_channelsTemp,
                    activityCountTemp,
                    showTrainVerboseTemp,
                    clientLearningRateTemp,
-                   adaptiveLearningRateTemp,
                    batch_sizeTemp,
                    localEpochTemp,
                    centralTestDataTemp,
                    centralTestLabelTemp,
                    generalizationTestTemp,
                    filepathTemp,
-                   muTemp,
-                   architecture_temp)
+                   muTemp)
 
 
     # In[ ]:
