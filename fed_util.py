@@ -601,11 +601,6 @@ def Moon_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,cl
 
 
 def MoonFiT(localMOONModel, prevModelEmbeddings, serverModelEmbeddings, clientDataTrain,clientLabelTrain, optimizer, mu=1.0,batch_size = 32, epochs=5, embedLayerIndex = 221,verbose=0):
-    print(clientDataTrain.shape, flush = True)
-    print(clientLabelTrain.shape, flush = True)
-    print(prevModelEmbeddings.shape, flush = True)
-    print(serverModelEmbeddings.shape, flush = True)
-
     dataset = tf.data.Dataset.from_tensor_slices((clientDataTrain, clientLabelTrain, prevModelEmbeddings, serverModelEmbeddings))
 
     for epoch in range(epochs):
@@ -613,24 +608,6 @@ def MoonFiT(localMOONModel, prevModelEmbeddings, serverModelEmbeddings, clientDa
         for batched_train, batched_label, prev_embeds, server_embeds in dataset:
             Moon_NT_Xent_gradients(localMOONModel, embedLayerIndex, batched_train, batched_label, 
                                    prev_embeds, server_embeds, optimizer, mu=mu)
-
-    
-    # for epoch in range(epochs):
-    #     indices = tf.range(start=0, limit = clientDataTrain.shape[0], dtype=tf.int32)
-    #     shuffled_indices = tf.random.shuffle(indices)
-    #     shuffled_train = tf.gather(clientDataTrain, shuffled_indices, axis=0)
-    #     shuffled_label = tf.gather(clientLabelTrain, shuffled_indices, axis=0)
-    #     for i in range(0, shuffled_train.shape[0] ,batch_size):   
-    #         batched_train = shuffled_train[i:i+batch_size]
-    #         batched_label = shuffled_label[i:i+batch_size]
-    #         Moon_NT_Xent_gradients(localMOONModel,
-    #                                embedLayerIndex,
-    #                                batched_train,
-    #                                batched_label,
-    #                                prevModelEmbeeddings[i:i+batch_size],
-    #                                serverModelEmbeddings[i:i+batch_size],
-    #                                optimizer,
-    #                                mu=mu)   
     return None
     
 @tf.function
