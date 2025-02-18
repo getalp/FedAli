@@ -2,13 +2,13 @@ if __name__ == "__main__":
     #!/usr/bin/env python
     # coding: utf-8
 
-    # In[ ]:
+    # In[1]:
 
 
     # if __name__ == "__main__":
 
 
-    # In[ ]:
+    # In[2]:
 
 
     from tensorflow.keras.optimizers import SGD
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     from os import listdir
 
 
-    # In[ ]:
+    # In[3]:
 
 
     import model 
@@ -49,17 +49,17 @@ if __name__ == "__main__":
     import alp_model
 
 
-    # In[ ]:
+    # In[4]:
 
 
     os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
     # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 
-    # In[ ]:
+    # In[5]:
 
 
-    algorithm = "FEDAVG"
+    algorithm = "MOON"
     # FEDALI, FEDAVG, FEDPROTO
     # MOON,FEDAVG,FEDPROX, FEDPAC
 
@@ -79,8 +79,6 @@ if __name__ == "__main__":
     GeneralizationTest = True
 
     clientLearningRate =  1e-4
-
-    adaptiveLearningRate =  clientLearningRate * 0.5
 
     batch_size = 64
 
@@ -116,19 +114,19 @@ if __name__ == "__main__":
     useGLU = True
 
 
-    # In[ ]:
+    # In[6]:
 
 
     prototypeLayers = [2048,1024,512,256,128,64]
 
 
-    # In[ ]:
+    # In[7]:
 
 
     nbOfBlocks = 6 
 
 
-    # In[ ]:
+    # In[8]:
 
 
     if(algorithm == "FEDPROX"):
@@ -138,44 +136,44 @@ if __name__ == "__main__":
     # MOON,FEDAVG,FEDALI,FEDPROX
 
 
-    # In[ ]:
+    # In[9]:
 
 
     def is_interactive():
         return not hasattr(main, '__file__')
+        
     def add_fit_args(parser):
         parser.add_argument('--dataset', type=str, default=dataSetName, 
-            help='Dataset')  
+            help='Name of the dataset to be used for training and evaluation.')  
         parser.add_argument('--algorithm', type=str, default=algorithm, 
-            help='Algorithm')
+            help='Federated learning algorithm to be used (e.g., FedAvg, MOON, FedProx).')
         parser.add_argument('--mu', type=float, default=mu, 
-            help='Mu')  
+            help='Regularization hyperparameter for contrastive learning-based methods like MOON and FedPAC.')  
         parser.add_argument('--parallelInstancesGPU', type=int, default=parallelInstancesGPU, 
-            help='Number of tasks per GPU')  
+            help='Number of parallel training instances per GPU.')  
         parser.add_argument('--localEpoch', type=int, default=localEpoch, 
-            help='Number of tasks per GPU')  
+            help='Number of local training epochs performed by each client before aggregation.')  
         parser.add_argument('--clientLearningRate', type=float, default=clientLearningRate, 
-            help='Number of tasks per GPU')  
+            help="Learning rate for clients' local model updates.")  
         parser.add_argument('--influenceFactor', type=float, default=influenceFactor, 
-            help='Number of tasks per GPU')  
+            help='Weight factor controlling the influence of prototypes on incoming embeddings.')  
         parser.add_argument('--initial_lr', type=float, default=initial_lr, 
-            help='Number of tasks per GPU')  
-        parser.add_argument('--clusterMethod', type=str, default=clusterMethod, 
-            help='clusterMethod')  
+            help='Initial learning rate for the global model training.')  
         parser.add_argument('--loadPretrain', type=lambda x: bool(strtobool(x)), default=loadPretrain,
-            help='loadPretrain')  
+            help='Whether to load a pre-trained model before training.')  
         parser.add_argument('--communicationRound', type=int, default=communicationRound, 
-            help='Number of communicationRound')  
+            help='Number of communication rounds in federated learning.')  
         parser.add_argument('--prototypeNum', type=int, default=prototypeNum, 
-            help='Number of prototypeNum')  
+            help='Number of prototypes used in embedding alignment.')  
         parser.add_argument('--usePersonalPrototype', type=lambda x: bool(strtobool(x)), default=usePersonalPrototype,
-            help='usePersonalPrototype')  
+            help='If enabled, retains personalized prototypes for each client instead of re-initializing with global prototypes for a new round.')  
         parser.add_argument('--useGLU', type=lambda x: bool(strtobool(x)), default=useGLU,
-            help='usePersonalPrototype')  
+            help='Enables Gated Linear Units (GLU) inside the ALP layer for feature transformation.')  
         parser.add_argument('--singleUpdate', type=lambda x: bool(strtobool(x)), default=singleUpdate,
-            help='usePersonalPrototype') 
+            help='Alternative prototype update strategy where only the prototype with the highest similarity gets updated, instead of using soft assignments.')  
         args = parser.parse_args()
         return args
+
 
     # clusterMethod
 
@@ -186,7 +184,6 @@ if __name__ == "__main__":
         localEpoch = args.localEpoch
         clientLearningRate = args.clientLearningRate
         mu = args.mu
-        clusterMethod = args.clusterMethod
         parallelInstancesGPU = args.parallelInstancesGPU
         loadPretrain = args.loadPretrain
         influenceFactor = args.influenceFactor
@@ -198,19 +195,19 @@ if __name__ == "__main__":
         singleUpdate = args.singleUpdate
 
 
-    # In[ ]:
+    # In[10]:
 
 
     prototype_linear_scheduler = LinearLearningRateScheduler(initial_lr,end_lr, 100)
 
 
-    # In[ ]:
+    # In[11]:
 
 
     prototypeNum = prototypeLayers[0]
 
 
-    # In[ ]:
+    # In[12]:
 
 
     # classifierEpoch
@@ -232,7 +229,6 @@ if __name__ == "__main__":
             architectureType = architectureType +'_personalPrototype'
         if(singleUpdate):
             architectureType = architectureType +'_single'
-        architectureType = architectureType +"_v4"
 
     if(algorithm == 'MOON' or algorithm == 'FEDPROX'):
         architectureType = architectureType +"_mu_"+str(mu)
@@ -276,7 +272,7 @@ if __name__ == "__main__":
     checkpointProp = load_checkpoint(filepath)
 
 
-    # In[ ]:
+    # In[13]:
 
 
     dataDirectory = './Datasets/FL_Clients/'
@@ -284,7 +280,7 @@ if __name__ == "__main__":
     testDataDirectory = dataDirectory +'testData/'
 
 
-    # In[ ]:
+    # In[14]:
 
 
     # load the data
@@ -329,14 +325,14 @@ if __name__ == "__main__":
         activityCount = len(ACTIVITY_LABEL)
 
 
-    # In[ ]:
+    # In[15]:
 
 
     clientCount = clientDataTest.shape[0]
     # to test/develop, you can set clients count manually to a lower number eg clientCount = 2 
 
 
-    # In[ ]:
+    # In[16]:
 
 
     for index,clientData in enumerate(clientDataTrain):
@@ -345,7 +341,7 @@ if __name__ == "__main__":
         clientDataTest[index] = clientData.astype('float32')
 
 
-    # In[ ]:
+    # In[17]:
 
 
     centralTrainLabel = np.vstack((clientLabelTrain))
@@ -353,7 +349,7 @@ if __name__ == "__main__":
     centralTestLabel = np.vstack((clientLabelTest))
 
 
-    # In[ ]:
+    # In[18]:
 
 
     availableGPUPOOl = get_available_gpus()
@@ -372,7 +368,7 @@ if __name__ == "__main__":
     modelPool = np.arange(len(resourcePool)).tolist()
 
 
-    # In[ ]:
+    # In[19]:
 
 
     # client models test againts own test-set
@@ -428,7 +424,7 @@ if __name__ == "__main__":
     previousPrototype =  checkpointProp['previousPrototype']
 
 
-    # In[ ]:
+    # In[20]:
 
 
     # initialization for asynchronous client training, client selection
@@ -437,7 +433,7 @@ if __name__ == "__main__":
     startRound = checkpointProp["CommunicationRound"]
 
 
-    # In[ ]:
+    # In[21]:
 
 
     trainingInit = os.path.exists(filepath+'serverWeights.h5') 
@@ -469,7 +465,7 @@ if __name__ == "__main__":
     serverModel.compile(optimizer=tf.keras.optimizers.SGD(0.005),loss=tf.keras.losses.CategoricalCrossentropy(), metrics=['acc'])   
 
 
-    # In[ ]:
+    # In[22]:
 
 
     def checkPointProgress():
@@ -531,7 +527,7 @@ if __name__ == "__main__":
 
 
 
-    # In[ ]:
+    # In[23]:
 
 
     allTrainDataSize = np.float32(len(centralTrainLabel))
@@ -541,7 +537,7 @@ if __name__ == "__main__":
     del allTrainDataSize
 
 
-    # In[ ]:
+    # In[24]:
 
 
     def limit_memory():
@@ -553,7 +549,7 @@ if __name__ == "__main__":
         gc.collect()
 
 
-    # In[ ]:
+    # In[25]:
 
 
     def enderOutputIndexSearch(model, layerSearchName = "pooling"):
@@ -568,14 +564,14 @@ if __name__ == "__main__":
         return representationLayer
 
 
-    # In[ ]:
+    # In[26]:
 
 
     embedLayerIndex = enderOutputIndexSearch(serverModel,layerSearchName = 'pooling')
     layerCount = len(serverModel.get_weights())
 
 
-    # In[ ]:
+    # In[27]:
 
 
     manager = Manager()
@@ -626,7 +622,7 @@ if __name__ == "__main__":
 
 
 
-    # In[ ]:
+    # In[28]:
 
 
     if(algorithm == 'FEDALI'):
@@ -722,13 +718,13 @@ if __name__ == "__main__":
         
 
 
-    # In[ ]:
+    # In[29]:
 
 
     loadPretrains = np.tile(loadPretrain,clientCount)
 
 
-    # In[ ]:
+    # In[30]:
 
 
     if(algorithm == "FEDPROTO"):
@@ -747,7 +743,7 @@ if __name__ == "__main__":
         os.makedirs(filepath + 'clientModels/', exist_ok=True)
 
 
-    # In[ ]:
+    # In[31]:
 
 
     # Federated learning training
@@ -1042,7 +1038,7 @@ if __name__ == "__main__":
             logging.warning("Global Accuracy " +str(globalTestAccHistory[-1]) +" Loss: " +str(globalTestLossHistory[-1]))
 
 
-    # In[ ]:
+    # In[32]:
 
 
     # convert datatypes to a np formats
@@ -1069,7 +1065,7 @@ if __name__ == "__main__":
         globalTestAccHistory = np.asarray(globalTestAccHistory[:communicationRound])
 
 
-    # In[ ]:
+    # In[33]:
 
 
     # Saving the training statistics and results
@@ -1100,7 +1096,7 @@ if __name__ == "__main__":
         hkl.dump(globalTestAccHistory,filepath + "trainingStats/globalTestAccHistory.hkl" )
 
 
-    # In[ ]:
+    # In[34]:
 
 
     # generate line chart function
@@ -1113,7 +1109,7 @@ if __name__ == "__main__":
         plt.clf()
 
 
-    # In[ ]:
+    # In[35]:
 
 
     # Plotting results
@@ -1162,7 +1158,7 @@ if __name__ == "__main__":
     plt.clf()
 
 
-    # In[ ]:
+    # In[36]:
 
 
     # Rounding number function 
@@ -1170,7 +1166,7 @@ if __name__ == "__main__":
         return round(np.mean(toRoundNb), 4)
 
 
-    # In[ ]:
+    # In[37]:
 
 
     #Generating personalized accuracy
@@ -1244,7 +1240,7 @@ if __name__ == "__main__":
     hkl.dump(genMacroTest,filepath + 'genMacroTest.hkl') 
 
 
-    # In[ ]:
+    # In[38]:
 
 
     def extract_intermediate_model_from_base_model(base_model, intermediate_layer=4):
@@ -1252,20 +1248,20 @@ if __name__ == "__main__":
         return model
 
 
-    # In[ ]:
+    # In[39]:
 
 
     perplexity = 30
 
 
-    # In[ ]:
+    # In[40]:
 
 
     clientEmbeddingFilePath = filepath + "clientEmbeddings/"
     os.makedirs(clientEmbeddingFilePath, exist_ok=True)
 
 
-    # In[ ]:
+    # In[41]:
 
 
     if(algorithm != 'FEDPER' and algorithm != 'FEDPROTO' and algorithm != 'FEDPAC' ):
@@ -1291,7 +1287,7 @@ if __name__ == "__main__":
         hkl.dump(macroVal_f1,filepath + 'macroVal_f1.hkl') 
 
 
-    # In[ ]:
+    # In[42]:
 
 
     if(algorithm == "FEDALP"):
@@ -1319,7 +1315,7 @@ if __name__ == "__main__":
         plt.clf()
 
 
-    # In[ ]:
+    # In[43]:
 
 
     clientOneIndex = 0
@@ -1340,7 +1336,7 @@ if __name__ == "__main__":
     embed2 = extract_intermediate_model_from_base_model(serverModel,embedLayerIndex)(clientDataTest[clientTwoIndex])
 
 
-    # In[ ]:
+    # In[44]:
 
 
     tsne_model = sklearn.manifold.TSNE(perplexity=perplexity, verbose=showTrainVerbose, random_state=randomSeed)
@@ -1372,7 +1368,7 @@ if __name__ == "__main__":
     hkl.dump(tsne_projections,filepath + "overlappingRepresentations.hkl" )
 
 
-    # In[ ]:
+    # In[45]:
 
 
     print("Training Done!")

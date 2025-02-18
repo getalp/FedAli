@@ -81,6 +81,7 @@ def fedAvg_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,
     trainHistory = localModel.fit(clientDataTrain, clientLabelTrain,batch_size = batch_size, epochs = localEpoch,verbose=showTrainVerbose)
     fitTime = (time.time() - startTime)/60 
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
     personalizationTrainAcc = np.mean(trainHistory.history['acc'])
@@ -361,6 +362,7 @@ def fedPac_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,
     
     personalizationTrainMetrics = localModel.evaluate(clientDataTrain, clientLabelTrain,batch_size = batch_size,verbose = showTrainVerbose)
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,batch_size = batch_size, verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,batch_size = batch_size, verbose = showTrainVerbose)
     localModel.save_weights(clientModelPath)
@@ -413,6 +415,7 @@ def fedProx_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest
     
 
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
     
@@ -463,6 +466,7 @@ def fedALP_prototypeOnly(clientNumber,clientDataTrain,clientLabelTrain,clientDat
     trainHistory = localModel.fit(clientDataTrain, clientLabelTrain,batch_size = batch_size, epochs = localEpoch,verbose=showTrainVerbose)
     fitTime = (time.time() - startTime)/60 
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
     personalizationTrainAcc = np.mean(trainHistory.history['acc'])
@@ -517,6 +521,7 @@ def fedAli_global_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDa
     trainHistory = localModel.fit(clientDataTrain, clientLabelTrain,batch_size = batch_size, epochs = localEpoch,verbose=showTrainVerbose)
     fitTime = (time.time() - startTime)/60 
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
     personalizationTrainAcc = np.mean(trainHistory.history['acc'])
@@ -574,6 +579,7 @@ def Moon_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,cl
     personalizationTrainAcc = trainHistory[1]
     personalizationTrainloss = trainHistory[0]
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
 
@@ -594,28 +600,42 @@ def Moon_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,cl
 
 
 
-def MoonFiT(localMOONModel, prevModelEmbeeddings, serverModelEmbeddings, clientDataTrain,clientLabelTrain, optimizer, mu=1.0,batch_size = 32, epochs=5, embedLayerIndex = 221,verbose=0):
-    epoch_wise_loss = []
-    epoch_wise_acc = []
-    for epoch in range(epochs):
-        indices = tf.range(start=0, limit = clientDataTrain.shape[0], dtype=tf.int32)
-        shuffled_indices = tf.random.shuffle(indices)
-        shuffled_train = tf.gather(clientDataTrain, shuffled_indices, axis=0)
-        shuffled_label = tf.gather(clientLabelTrain, shuffled_indices, axis=0)
-        for i in range(0, shuffled_train.shape[0] ,batch_size):   
-            batched_train = shuffled_train[i:i+batch_size]
-            batched_label = shuffled_label[i:i+batch_size]
-            Moon_NT_Xent_gradients(localMOONModel,
-                                   embedLayerIndex,
-                                   batched_train,
-                                   batched_label,
-                                   prevModelEmbeeddings[i:i+batch_size],
-                                   serverModelEmbeddings[i:i+batch_size],
-                                   optimizer,
-                                   mu=mu)   
-    return None
+def MoonFiT(localMOONModel, prevModelEmbeddings, serverModelEmbeddings, clientDataTrain,clientLabelTrain, optimizer, mu=1.0,batch_size = 32, epochs=5, embedLayerIndex = 221,verbose=0):
+    print(clientDataTrain.shape, flush = True)
+    print(clientLabelTrain.shape, flush = True)
+    print(prevModelEmbeddings.shape, flush = True)
+    print(serverModelEmbeddings.shape, flush = True)
 
+    dataset = tf.data.Dataset.from_tensor_slices((clientDataTrain, clientLabelTrain, prevModelEmbeddings, serverModelEmbeddings))
+
+    for epoch in range(epochs):
+        dataset = dataset.shuffle(len(clientDataTrain)).batch(batch_size,drop_remainder=True)
+        for batched_train, batched_label, prev_embeds, server_embeds in dataset:
+            Moon_NT_Xent_gradients(localMOONModel, embedLayerIndex, batched_train, batched_label, 
+                                   prev_embeds, server_embeds, optimizer, mu=mu)
+
+    
+    # for epoch in range(epochs):
+    #     indices = tf.range(start=0, limit = clientDataTrain.shape[0], dtype=tf.int32)
+    #     shuffled_indices = tf.random.shuffle(indices)
+    #     shuffled_train = tf.gather(clientDataTrain, shuffled_indices, axis=0)
+    #     shuffled_label = tf.gather(clientLabelTrain, shuffled_indices, axis=0)
+    #     for i in range(0, shuffled_train.shape[0] ,batch_size):   
+    #         batched_train = shuffled_train[i:i+batch_size]
+    #         batched_label = shuffled_label[i:i+batch_size]
+    #         Moon_NT_Xent_gradients(localMOONModel,
+    #                                embedLayerIndex,
+    #                                batched_train,
+    #                                batched_label,
+    #                                prevModelEmbeeddings[i:i+batch_size],
+    #                                serverModelEmbeddings[i:i+batch_size],
+    #                                optimizer,
+    #                                mu=mu)   
+    return None
+    
+@tf.function
 def Moon_NT_Xent_gradients(model, embedLayerIndex, trainData,trainLabel, prevModelEmbeds, serverEmbeds,optimizer, temperature=0.5, mu=1.0,):
+    """Compute gradients and update weights based on contrastive loss."""
     with tf.GradientTape() as tape:
         client_features,outputs = model(trainData,training=True)
         contrastive_loss = moon_contrastive(client_features,serverEmbeds,prevModelEmbeds, temperature = temperature, mu = mu)
@@ -627,23 +647,20 @@ def Moon_NT_Xent_gradients(model, embedLayerIndex, trainData,trainLabel, prevMod
 
 @tf.function
 def cosine_similarity(x1, x2):
-    # Normalize the vectors to unit length
+    """Compute cosine similarity between two tensors."""
     x1_normalized = tf.nn.l2_normalize(x1, axis=1)
     x2_normalized = tf.nn.l2_normalize(x2, axis=1)
     
-    # Compute the cosine similarity
     return tf.reduce_sum(tf.multiply(x1_normalized, x2_normalized), axis=1)
 @tf.function
 def moon_contrastive(z, zglob, zprev, temperature=1.0, mu=1.0):
-    # Compute similarities
+    """Compute contrastive loss using previous and global embeddings."""
     sim_z_zglob = cosine_similarity(z, zglob)
     sim_z_zprev = cosine_similarity(z, zprev)
 
-    # Exponentiate the similarities divided by tau
     exp_sim_z_zglob = tf.exp(sim_z_zglob / temperature)
     exp_sim_z_zprev = tf.exp(sim_z_zprev / temperature)
 
-    # Compute the softmax denominator and contrastive loss
     softmax_denominator = exp_sim_z_zglob + exp_sim_z_zprev
     contrastive_loss = -tf.math.log(exp_sim_z_zglob / softmax_denominator)
 
@@ -674,9 +691,6 @@ def difference_model_norm_2_square(local_model, global_model):
     return squared_norm
 
 def fedProxFit(localModel,serverModel,clientDataTrain,clientLabelTrain,fedProxMU,optimizer,batchSize,epochs):
-    epoch_wise_loss = []
-    epoch_wise_acc = []
-    
     for epoch in range(epochs):
         indices = tf.range(start=0, limit = clientDataTrain.shape[0], dtype=tf.int32)
         shuffled_indices = tf.random.shuffle(indices)
@@ -764,6 +778,7 @@ def fedProto_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTes
         # loss_acc = localModel.evaluate(clientDataTrain,clientLabelTrain,verbose = 0)
     personalizationTrainMetrics = localModel.evaluate(clientDataTrain, clientLabelTrain,verbose = showTrainVerbose)
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
     localModel.save_weights(clientModelPath)
@@ -852,6 +867,7 @@ def fedPer_Trainer(clientNumber,clientDataTrain,clientLabelTrain,clientDataTest,
     trainHistory = localModel.fit(clientDataTrain, clientLabelTrain,batch_size = batch_size, epochs = localEpoch,verbose=showTrainVerbose)
     fitTime = (time.time() - startTime)/60 
     personalizationTestMetrics = localModel.evaluate(clientDataTest, clientLabelTest,verbose = showTrainVerbose)
+    generalizationMetrics = [None, None]
     if(GeneralizationTest):
         generalizationMetrics = localModel.evaluate(centralTestData, centralTestLabel,verbose = showTrainVerbose)
     personalizationTrainAcc = np.mean(trainHistory.history['acc'])
